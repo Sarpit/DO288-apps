@@ -1,0 +1,72 @@
+---
+ - name: paly1
+   hosts: localhost
+   gather_facts: no
+   become: no
+   tasks:
+   - name: auth
+     redhat.openshift.openshift_auth:
+       host: https://api.ocp4.example.com:6443
+       username: developer
+       password: developer
+       ca_cert: /etc/pki/tls/certs/ca-bundle.crt 
+     register: auth
+ - name: play2
+   hosts: localhost
+   gather_facts: no
+   become: no
+   module_defaults:
+     group/redhat.openshift.openshift:
+       ca_cert: /etc/pki/tls/certs/ca-bundle.crt
+       host: https://api.ocp4.example.com:6443
+       namespace: "{{ project }}"
+       api_key: "{{ auth.openshift_auth.api_key }}"
+     group/kubernetes.core.k8s:
+       ca_cert: /etc/pki/tls/certs/ca-bundle.crt
+       host: https://api.ocp4.example.com:6443
+       namespace: "{{ project }}"
+       api_key: "{{ auth.openshift_auth.api_key }}"
+   vars:
+     project: automation-ansible
+   tasks:
+   - redhat.openshift.k8s:
+       state: present
+       resource_definition:
+         apiVersion: project.openshift.io/v1
+         kind: Project
+         metadata:
+           name: "{{ project }}"
+
+   - redhat.openshift.k8s:
+       state: present
+       src: hello.yml
+
+   - kubernetes.core.k8s_info:
+       kind: Pod
+       label_selectors:
+       - app = hello
+     register: podinfo
+
+   - debug: var=podinfo
+
+   - kubernetes.core.k8s_scale:
+       kind: Deployment
+       name: hello
+       replicas: 1
+
+   - redhat.openshift.openshift_route:
+       service: hello-svc
+     register: ro
+
+   - uri:
+       url: "http://{{ ro.result.spec.host }}"
+       return_content: true
+     register: _result
+     until: _result.status == 200
+     retries: 10 # 720 * 5 seconds = 1hour (60*60/5)
+     delay: 5 # Every 5 seconds
+
+   - debug: var=_result.content
+
+
+
